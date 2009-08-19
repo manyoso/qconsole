@@ -1,11 +1,12 @@
 #ifndef PSEUDOTERMINAL_H
 #define PSEUDOTERMINAL_H
 
-#include <QtCore/QObject>
 #include <QtCore/QProcess>
 #include <QtCore/QSocketNotifier>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
+
+class Pty;
 
 class PseudoTerminal : public QProcess
 {
@@ -40,14 +41,11 @@ private:
     void exit();
 
 private:
+    Pty *m_pty;
     QSocketNotifier *m_readMaster;
     QSocketNotifier *m_writeMaster;
     QSocketNotifier *m_readSlave;
     QSocketNotifier *m_writeSlave;
-    typedef int FileDescriptor;
-    FileDescriptor m_master;
-    FileDescriptor m_slave;
-    QByteArray m_slaveName;
     bool m_isOpen;
 };
 
