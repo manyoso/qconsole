@@ -22,6 +22,7 @@ protected:
     virtual void setupChildProcess();
 
 private Q_SLOTS:
+    void processStateChanged(QProcess::ProcessState);
     void encounteredError(QProcess::ProcessError);
     void readStandardError();
     void readStandardOutput();

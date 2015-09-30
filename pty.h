@@ -1,6 +1,8 @@
 #ifndef PTY_H
 #define PTY_H
 
+#include <QtCore/QString>
+
 typedef int FileDescriptor;
 
 class Pty
@@ -28,7 +30,7 @@ public:
 private:
     FileDescriptor m_master;
     FileDescriptor m_slave;
-    const char *m_slaveName;
+    QString m_slaveName;
 };
 
 #endif // PTY_H

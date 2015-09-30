@@ -1,5 +1,6 @@
 #include "pty.h"
 
+#include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <sys/ioctl.h>
@@ -7,12 +8,10 @@
 #include <utmpx.h>
 
 #include <QtCore/QDebug>
-#include <QtCore/QString>
 
 Pty::Pty()
     : m_master(-1)
     , m_slave(-1)
-    , m_slaveName(0)
 {
 }
 
@@ -22,44 +21,80 @@ Pty::~Pty()
 
 bool Pty::openPty()
 {
+    int rc = 0;
+
     // Open master pseudo terminal
     m_master = ::posix_openpt(O_RDWR | O_NOCTTY);
-
-    Q_ASSERT(m_master > 0);
+    if (m_master <= 0) {
+        qFatal("Could not open a pseudo-terminal device: %s (%d).", strerror(errno), errno);
+        goto fail;
+    }
 
     // Get the associated slave name
     m_slaveName = ptsname(m_master);
-
-    // Change the mode and ownership of the slave associated to point to this process
-    Q_ASSERT(!grantpt(m_master));
-
-    // Unlock the slave associated with this master pseudo terminal
-    unlockpt(m_master);
-
-    // Open the slave
-    m_slave = ::open(m_slaveName, O_RDWR | O_NOCTTY);
-    if (m_slave < 0) {
-        qWarning() << "Warning: Can't open slave pseudo terminal!";
-        ::close(m_master);
-        m_master = -1;
-        return false;
+    if (m_slaveName.isEmpty()) {
+        qFatal("Could not get name of the slave pseudo-terminal device: %s (%d).", strerror(errno), errno);
+        goto fail;
     }
 
-    fcntl(m_master, F_SETFD, FD_CLOEXEC);
-    fcntl(m_slave, F_SETFD, FD_CLOEXEC);
+    // Change the mode and ownership of the slave associated to point to this process
+    rc = grantpt(m_master);
+    if (rc != 0) {
+        qFatal("Could not grant access to the slave pseudo-terminal device: %s (%d).", strerror(errno), errno);
+        goto fail;
+    }
+
+    // Unlock the slave associated with this master pseudo terminal
+    rc = unlockpt(m_master);
+    if (rc != 0) {
+        qFatal("Could not unlock a pseudo-terminal master/slave pair: %s (%d).", strerror(errno), errno);
+        goto fail;
+    }
+
+    // Open the slave
+    m_slave = ::open(m_slaveName.toAscii().data(), O_RDWR | O_NOCTTY);
+    if (m_slave < 0) {
+        qFatal("Could not open slave pseudo-terminal: %s (%d).", strerror(errno), errno);
+        goto fail;
+    }
+
+    rc = fcntl(m_master, F_SETFD, FD_CLOEXEC);
+    if (rc == -1) {
+        qFatal("Could not set file descriptor flags on master: %s (%d).", strerror(errno), errno);
+        goto fail;
+    }
+
+    rc = fcntl(m_slave, F_SETFD, FD_CLOEXEC);
+    if (rc == -1) {
+        qFatal("Could not set file descriptor flags on slave: %s (%d).", strerror(errno), errno);
+        goto fail;
+    }
 
     struct ::termios ttmode;
-    Q_ASSERT(!tcgetattr(m_master, &ttmode));
-    ttmode.c_iflag |= IUTF8;
-    Q_ASSERT(!tcsetattr(m_master, TCSANOW, &ttmode));
+    rc = tcgetattr(m_master, &ttmode);
+    if (rc != 0) {
+        qFatal("Could not get the parameters associated with the terminal: %s (%d).", strerror(errno), errno);
+        goto fail;
+    }
 
-    qDebug() << "Successfully opened" << m_slaveName;
+    ttmode.c_iflag |= IUTF8;
+
+    rc = tcsetattr(m_master, TCSANOW, &ttmode);
+    if (rc != 0) {
+        qFatal("Could not set the parameters associated with the terminal: %s (%d).", strerror(errno), errno);
+        goto fail;
+    }
 
     return true;
+
+fail:
+    closePty();
+    return false;
 }
 
 void Pty::closePty()
 {
+    m_slaveName = QString();
     if (m_slave >= 0) {
         ::close(m_slave);
         m_slave = -1;
@@ -101,11 +136,14 @@ void Pty::login()
     setutxent();
     pututxline(&loginInfo);
     endutxent();
-    updwtmpx(_PATH_WTMPX, &loginInfo);
+#if !defined(__APPLE__)
+    updwtmpx(_PATH_UTMPX, &loginInfo);
+#endif
 }
 
 void Pty::logout()
 {
+    qDebug() << "Pty::logout";
 }
 
 void Pty::readMaster()
@@ -113,14 +151,14 @@ void Pty::readMaster()
     char buffer[1025];
     int len = ::read(m_master, buffer, 1024);
     QByteArray data = QByteArray(buffer, len);
-    qDebug() << "readMaster" << data << len;
+    qDebug() << "Pty::readMaster data:" << data << " len:" << len;
 }
 
 void Pty::writeMaster()
 {
     //QByteArray bytes = "/bin/bash\n";
     //int result = ::write(m_master, bytes.constData(), bytes.size());
-    //qDebug() << "writeMaster";
+    //qDebug() << "Pty::writeMaster";
 }
 
 void Pty::readSlave()
@@ -128,14 +166,14 @@ void Pty::readSlave()
     char buffer[1025];
     int len = ::read(m_master, buffer, 1024);
     QByteArray data = QByteArray(buffer, len);
-    qDebug() << "readSlave" << data << len;
+    qDebug() << "Pty::readSlave data:" << data << " len:" << len;
 }
 
 void Pty::writeSlave()
 {
     //QByteArray bytes = "/bin/bash\n";
     //int result = ::write(m_slave, bytes.constData(), bytes.size());
-    //qDebug() << "writeSlave";
+    //qDebug() << "Pty::writeSlave";
 }
 
 void Pty::setupChildProcess()

@@ -12,6 +12,7 @@ PseudoTerminal::PseudoTerminal(QObject *parent)
     , m_writeSlave(0)
     , m_isOpen(false)
 {
+    setProcessChannelMode(QProcess::SeparateChannels);
     m_pty = new Pty();
 }
 
@@ -26,6 +27,8 @@ PseudoTerminal::~PseudoTerminal()
 void PseudoTerminal::startPty(const QString &program, const QStringList &arguments)
 {
     openPty();
+    connect(this, SIGNAL(stateChanged(QProcess::ProcessState)),
+            this, SLOT(processStateChanged(QProcess::ProcessState)));
     connect(this, SIGNAL(error(QProcess::ProcessError)),
             this, SLOT(encounteredError(QProcess::ProcessError)));
     connect(this, SIGNAL(readyReadStandardError()),
@@ -45,6 +48,12 @@ void PseudoTerminal::setupChildProcess()
     //We've forked, but haven't executed yet
     m_pty->setupChildProcess();
     m_pty->login();
+}
+
+void PseudoTerminal::processStateChanged(QProcess::ProcessState state)
+{
+    if (state == QProcess::NotRunning)
+        m_pty->logout();
 }
 
 void PseudoTerminal::encounteredError(QProcess::ProcessError error)
@@ -92,7 +101,6 @@ bool PseudoTerminal::openPty()
     m_isOpen = m_pty->openPty();
 
     if (m_isOpen) {
-        qDebug() << "Setting up socket notifiers";
         m_readMaster = new QSocketNotifier(m_pty->master(), QSocketNotifier::Read, this);
         m_readMaster->setEnabled(true);
         connect(m_readMaster, SIGNAL(activated(int)), this, SLOT(readMaster()));
